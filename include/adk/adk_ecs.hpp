@@ -148,14 +148,14 @@ struct component_allocator : public i_component_allocator<entity_id>
     T& get(entity_id entity)
     {
         const auto index = get_entity_index(entity);
-        AECS_ASSERT(arr.size() >= index);
+        ADK_ASSERT(arr.size() >= index);
         return arr[index];
     }
 
     void destroy(entity_id entity)
     {
         const auto index = get_entity_index(entity);
-        AECS_ASSERT(arr.size() >= index);
+        ADK_ASSERT(arr.size() >= index);
         arr[index] = T{};
     }
 
@@ -189,7 +189,7 @@ public:
             });
         }
 
-        AECS_ASSERT(allocators.find(type_index) != allocators.end());
+        ADK_ASSERT(allocators.find(type_index) != allocators.end());
 
         const auto allocator = static_cast<component_allocator<entity_id, T>*>(allocators[type_index].get());
         return allocator->insert(entity, std::move(component));
@@ -202,7 +202,7 @@ public:
     T& get(entity_id entity)
     {
         const auto type_index = std::type_index(typeid(T));
-        AECS_ASSERT(allocators.find(type_index) != allocators.end());
+        ADK_ASSERT(allocators.find(type_index) != allocators.end());
         const auto allocator = static_cast<component_allocator<entity_id, T>*>(allocators[type_index].get());
         return allocator->get(entity);
     }
@@ -214,7 +214,7 @@ public:
     void destroy(entity_id entity)
     {
         const auto type_index = std::type_index(typeid(T));
-        AECS_ASSERT(allocators.find(type_index) != allocators.end());
+        ADK_ASSERT(allocators.find(type_index) != allocators.end());
         const auto allocator = static_cast<component_allocator<entity_id, T>*>(allocators[type_index].get());
         return allocator->destroy(entity);
     }
