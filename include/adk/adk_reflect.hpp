@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 
 #ifdef ADK_USE_ASSERTIONS
     #define ADK_ASSERT(condition) assert(condition)
@@ -102,7 +103,7 @@ template<unsigned N> comptime_string(char const (&)[N]) -> comptime_string<N - 1
 /**
  * Metadata for a class, must be specialized.
  */
-template <typename Class>
+template <typename ClassName>
 struct class_descriptor;
 
 /**
@@ -110,6 +111,16 @@ struct class_descriptor;
  */
 template <typename ClassDescriptor, comptime_string name>
 struct member_descriptor;
+
+/**
+ * SFINAE function that checks if class_descriptor is specialized for a
+ * certain class.
+ */
+template <typename ClassName, typename = void>
+struct is_class_reflected : std::false_type {};
+
+template <typename ClassName>
+struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), void())> : std::true_type {};
 
 /**
  * Introduces the metadata for an individual class member.
@@ -123,6 +134,39 @@ struct member_descriptor;
         static constexpr std::string_view name = #member_name;                                              \
         static constexpr std::size_t offset = offsetof(class_name, member_name);                            \
     };
+
+
+/**
+ * Given an object, a function, and a member descriptor, calls the function with
+ * a reference to the type described in the member descriptor contained in the
+ * passed object.
+ */
+template <typename MemberDescriptor, typename ClassName, typename Func>
+void call_member_data(ClassName* object, Func func)
+{
+    using member_type = typename MemberDescriptor::type;
+    member_type* value = reinterpret_cast<member_type*>(static_cast<char*>(static_cast<void*>(object)) + MemberDescriptor::offset);
+    func(*value);
+}
+
+/**
+ * Tuple foreach struct that needs specialized.
+ */
+template <typename Tuple>
+struct call_for_each_member;
+
+/**
+ * Calls a function with an object for each argument in a tuple type
+ */
+template <typename... Args>
+struct call_for_each_member<std::tuple<Args...>> 
+{
+    template <typename ClassName, typename Func>
+    constexpr void operator()(ClassName* object, Func func)
+    {
+        (call_member_data<Args>(object, func),...);
+    }
+};
 
 } // namespace adk::reflect::internal
 
@@ -141,6 +185,18 @@ namespace adk::reflect
         static constexpr std::string_view name = #class_name;                                               \
     };                                                                                                      \
     ADK_INTERNAL_FOR_EACH(class_name, ADK_INTERNAL_REFLECT_MEMBER, __VA_ARGS__);
+    
+    /**
+     * Calls passed function with a reference to each member in passed
+     * object.
+     */
+    template <typename ClassName, typename Func>
+    void for_each_member(ClassName* object, Func func)
+    {
+        static_assert(internal::is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
+        using class_descriptor = internal::class_descriptor<ClassName>;
+        internal::call_for_each_member<typename class_descriptor::members>()(object, func);
+    }
 
 } // namespace adk::reflect
 
