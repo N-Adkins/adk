@@ -91,44 +91,24 @@ template<unsigned N> comptime_string(char const (&)[N]) -> comptime_string<N - 1
 
 #define ADK_INTERNAL_FOR_EACH_COMMA_AGAIN() ADK_INTERNAL_FOR_EACH_COMMA_HELPER
 
+#define COMPTIME_STRING(str) adk::reflect::internal::comptime_string(str)
+
 /**
  * Produces the type of a member descriptor giving the name of 
  * the member and the class name.
  */
 #define ADK_INTERNAL_MEMBER_TYPE(class_name, member_name)                                                   \
-    adk::reflect::internal::member_descriptor<                                                              \
-        adk::reflect::internal::class_descriptor<class_name>,                                               \
-        adk::reflect::internal::comptime_string(#member_name)>                                              \
-   
-/**
- * Metadata for a class, must be specialized.
- */
-template <typename ClassName>
-struct class_descriptor;
-
-/**
- * Metadata for a member of a class, must be specialized.
- */
-template <typename ClassDescriptor, comptime_string name>
-struct member_descriptor;
-
-/**
- * SFINAE function that checks if class_descriptor is specialized for a
- * certain class.
- */
-template <typename ClassName, typename = void>
-struct is_class_reflected : std::false_type {};
-
-template <typename ClassName>
-struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), void())> : std::true_type {};
+    adk::reflect::member_descriptor<                                                                        \
+        adk::reflect::class_descriptor<class_name>,                                                         \
+        COMPTIME_STRING(#member_name)>                                                                      \
 
 /**
  * Introduces the metadata for an individual class member.
  */
 #define ADK_INTERNAL_REFLECT_MEMBER(class_name, member_name)                                                \
-    template <> struct adk::reflect::internal::member_descriptor<                                           \
-        adk::reflect::internal::class_descriptor<class_name>,                                               \
-        adk::reflect::internal::comptime_string(#member_name)>                                                            \
+    template <> struct adk::reflect::member_descriptor<                                                     \
+        adk::reflect::class_descriptor<class_name>,                                                         \
+        COMPTIME_STRING(#member_name)>                                                                      \
     {                                                                                                       \
         using type = decltype(class_name::member_name);                                                     \
         static constexpr std::string_view name = #member_name;                                              \
@@ -146,7 +126,7 @@ void call_member_data(ClassName* object, Func func)
 {
     using member_type = typename MemberDescriptor::type;
     member_type* value = reinterpret_cast<member_type*>(static_cast<char*>(static_cast<void*>(object)) + MemberDescriptor::offset);
-    func(*value);
+    func(MemberDescriptor::name, *value);
 }
 
 /**
@@ -174,10 +154,34 @@ namespace adk::reflect
 {
 
 /**
+ * Metadata for a class, must be specialized.
+ */
+template <typename ClassName>
+struct class_descriptor;
+
+/**
+ * Metadata for a member of a class, must be specialized.
+ */
+template <typename ClassDescriptor, internal::comptime_string name>
+struct member_descriptor;
+
+/**
+ * SFINAE function that checks if class_descriptor is specialized for a
+ * certain class.
+ */
+template <typename ClassName, typename = void>
+struct is_class_reflected : std::false_type {};
+
+template <typename ClassName>
+struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), void())> : std::true_type {};
+
+
+
+/**
  * Introduces compile-time reflection metadata of the provided class and public members.
  */
 #define ADK_REFLECT_CLASS(class_name, ...)                                                                  \
-    template <> struct adk::reflect::internal::class_descriptor<class_name>                                 \
+    template <> struct adk::reflect::class_descriptor<class_name>                                           \
     {                                                                                                       \
         using members =                                                                                     \
             std::tuple<ADK_INTERNAL_FOR_EACH_COMMA(class_name, ADK_INTERNAL_MEMBER_TYPE, __VA_ARGS__)>;     \
@@ -193,8 +197,8 @@ namespace adk::reflect
     template <typename ClassName, typename Func>
     void for_each_member(ClassName* object, Func func)
     {
-        static_assert(internal::is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
-        using class_descriptor = internal::class_descriptor<ClassName>;
+        static_assert(is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
+        using class_descriptor = class_descriptor<ClassName>;
         internal::call_for_each_member<typename class_descriptor::members>()(object, func);
     }
 
