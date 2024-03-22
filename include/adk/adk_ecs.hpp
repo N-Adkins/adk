@@ -31,7 +31,7 @@
     #define ADK_ASSERT(...) ((void)0);
 #endif
 
-namespace adk::internal
+namespace adk::ecs::internal
 {
 
 // Constant values and types
@@ -297,10 +297,10 @@ struct make_view_tuple<T, Types...>
 template <typename entity_id, typename... Types>
 using view_tuple = tuple_cat_t<std::tuple<entity_id>, typename make_view_tuple<Types...>::type>;
 
-} // namespace adk::internal
+} // namespace adk::ecs::internal
 
 // Public interface
-namespace adk
+namespace adk::ecs
 {
 
 /**
@@ -536,6 +536,6 @@ public:
     }
 };
 
-} // namespace adk
+} // namespace adk::ecs
 
 #endif
