@@ -17,6 +17,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 
 #ifdef ADK_USE_ASSERTIONS
     #define ADK_ASSERT(condition) assert(condition)
@@ -103,6 +104,15 @@ template<unsigned N> comptime_string(char const (&)[N]) -> comptime_string<N - 1
         COMPTIME_STRING(#member_name)>                                                                      \
 
 /**
+ * Produces the type of an enum class item descriptor giving the name of 
+ * the enum class and the item name.
+ */
+#define ADK_INTERNAL_ENUM_CLASS_ITEM_TYPE(enum_name, item_name)                                             \
+    adk::reflect::enum_class_item_descriptor<                                                               \
+        adk::reflect::enum_class_descriptor<enum_name>,                                                     \
+        enum_name::item_name>                                                                               \
+
+/**
  * Introduces the metadata for an individual class member.
  */
 #define ADK_INTERNAL_REFLECT_MEMBER(class_name, member_name)                                                \
@@ -115,6 +125,83 @@ template<unsigned N> comptime_string(char const (&)[N]) -> comptime_string<N - 1
         static constexpr std::size_t offset = offsetof(class_name, member_name);                            \
     };
 
+/**
+ * Introduces the metadata for an individual enum class member.
+ */
+#define ADK_INTERNAL_REFLECT_ENUM_CLASS_ITEM(enum_name, item_name)                                          \
+template <> struct adk::reflect::enum_class_item_descriptor<                                                \
+        adk::reflect::enum_class_descriptor<enum_name>,                                                     \
+        enum_name::item_name>                                                                               \
+    {                                                                                                       \
+        using type = std::underlying_type<enum_name>::type;                                                 \
+        static constexpr std::string_view truncated_name = #item_name;                                      \
+        static constexpr std::string_view name = #enum_name "::" #item_name;                                      \
+        static constexpr enum_name enum_value = enum_name::item_name;                                       \
+        static constexpr type underlying_value = static_cast<type>(enum_name::item_name);                   \
+    };
+
+/**
+ * Given an object, a function, and a member descriptor, calls the function with
+ * a reference to the type described in the member descriptor contained in the
+ * passed object.
+ */
+template <typename ItemDescriptor, typename Func>
+constexpr void call_item_data(Func func)
+{
+    func(ItemDescriptor::name, ItemDescriptor::enum_value, ItemDescriptor::underlying_value);
+}
+
+/**
+ * Tuple foreach struct that needs specialized.
+ */
+template <typename Tuple>
+struct call_for_each_item;
+
+/**
+ * Calls a function for each item in an enum
+ */
+template <typename... Args>
+struct call_for_each_item<std::tuple<Args...>> 
+{
+    template <typename Func>
+    constexpr void operator()(Func func)
+    {
+        (call_item_data<Args>(func),...);
+    }
+};
+
+template <typename EnumName, typename ItemDescriptor>
+void init_enum_class_map_pair(std::unordered_map<EnumName, std::string_view>& map)
+{
+    map[ItemDescriptor::enum_value] = ItemDescriptor::name;
+}
+
+/**
+ * Tuple foreach struct that needs specialized.
+ */
+template <typename Tuple>
+struct init_enum_class_map_for_each;
+
+/**
+ * Calls a function with an object for each argument in a tuple type
+ */
+template <typename... Args>
+struct init_enum_class_map_for_each<std::tuple<Args...>> 
+{
+    template <typename EnumName>
+    constexpr void operator()(std::unordered_map<EnumName, std::string_view>& map)
+    {
+        (init_enum_class_map_pair<EnumName, Args>(map),...);
+    }
+};
+
+template <typename EnumName, typename Tuple>
+std::unordered_map<EnumName, std::string_view> generate_enum_class_map()
+{
+    std::unordered_map<EnumName, std::string_view> map;
+    init_enum_class_map_for_each<Tuple>()(map); 
+    return map;
+}
 
 /**
  * Given an object, a function, and a member descriptor, calls the function with
@@ -175,8 +262,6 @@ struct is_class_reflected : std::false_type {};
 template <typename ClassName>
 struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), void())> : std::true_type {};
 
-
-
 /**
  * Introduces compile-time reflection metadata of the provided class and public members.
  */
@@ -195,13 +280,77 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
      * object.
      */
     template <typename ClassName, typename Func>
-    void for_each_member(ClassName* object, Func func)
+    void for_each_class_member(ClassName* object, Func func)
     {
         static_assert(is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
         using class_descriptor = class_descriptor<ClassName>;
         internal::call_for_each_member<typename class_descriptor::members>()(object, func);
     }
 
+    /**
+     * Metadata for an enum class, must be specialized.
+     */
+    template <typename EnumName>
+    struct enum_class_descriptor;
+
+    /**
+     * Metadata for an item of an enum class, must be specialized.
+     */
+    template <typename EnumDescriptor, EnumDescriptor::type item>
+    struct enum_class_item_descriptor;
+
+    /**
+     * SFINAE function that checks if enum_class_descriptor is specialized for a
+     * certain class.
+     */
+    template <typename EnumName, typename = void>
+    struct is_enum_class_reflected : std::false_type {};
+
+    template <typename EnumName>
+    struct is_enum_class_reflected<EnumName, decltype(enum_class_descriptor<EnumName>(), void())> : std::true_type {};
+    
+/**
+ * Introduces compile-time reflection metadata of the provided enum class and items.
+ */
+#define ADK_REFLECT_ENUM_CLASS(enum_name, ...)                                                                   \
+    template <> struct adk::reflect::enum_class_descriptor<enum_name>                                       \
+    {                                                                                                       \
+        using type = enum_name;                                                                             \
+        using items = std::tuple<                                                                           \
+            ADK_INTERNAL_FOR_EACH_COMMA(                                                                    \
+            enum_name,                                                                                      \
+            ADK_INTERNAL_ENUM_CLASS_ITEM_TYPE,                                                              \
+            __VA_ARGS__)>;                                                                                  \
+        static constexpr std::size_t item_count = std::tuple_size_v<items>;                                 \
+        static constexpr std::string_view name = #enum_name;                                                \
+        inline static const auto map =                                                                      \
+            adk::reflect::internal::generate_enum_class_map<enum_name, items>();                            \
+    };                                                                                                      \
+    ADK_INTERNAL_FOR_EACH(enum_name, ADK_INTERNAL_REFLECT_ENUM_CLASS_ITEM, __VA_ARGS__);
+    
+    /**
+     * Converts an enum class value to a string showing the full enum type name and
+     * the value name
+     */
+    template <typename EnumName>
+    std::string_view enum_class_to_string(EnumName value)
+    {
+        static_assert(is_enum_class_reflected<EnumName>::value, "Passed enum class has no reflection metadata!");
+        using enum_descriptor = enum_class_descriptor<EnumName>;
+        return enum_descriptor::map.at(value);        
+    }
+
+    /**
+     * Calls passed function with data for each item in an enum
+     */
+    template <typename EnumName, typename Func>
+    constexpr void for_each_enum_class_item(Func func)
+    {
+        static_assert(is_enum_class_reflected<EnumName>::value, "Passed enum class has no reflection metadata!");
+        using enum_descriptor = enum_class_descriptor<EnumName>;
+        internal::call_for_each_item<typename enum_descriptor::items>()(func);
+    }
+    
 } // namespace adk::reflect
 
 #endif
