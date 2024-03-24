@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <memory>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -209,10 +210,10 @@ std::unordered_map<EnumName, std::string_view> generate_enum_class_map()
  * passed object.
  */
 template <typename MemberDescriptor, typename ClassName, typename Func>
-void call_member_data(ClassName* object, Func func)
+void call_member_data(ClassName& object, Func func)
 {
     using member_type = typename MemberDescriptor::type;
-    member_type* value = reinterpret_cast<member_type*>(static_cast<char*>(static_cast<void*>(object)) + MemberDescriptor::offset);
+    member_type* value = reinterpret_cast<member_type*>(static_cast<char*>(static_cast<void*>(std::addressof(object))) + MemberDescriptor::offset);
     func(MemberDescriptor::name, *value);
 }
 
@@ -229,7 +230,7 @@ template <typename... Args>
 struct call_for_each_member<std::tuple<Args...>> 
 {
     template <typename ClassName, typename Func>
-    constexpr void operator()(ClassName* object, Func func)
+    constexpr void operator()(ClassName& object, Func func)
     {
         (call_member_data<Args>(object, func),...);
     }
@@ -280,7 +281,7 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
      * object.
      */
     template <typename ClassName, typename Func>
-    void for_each_class_member(ClassName* object, Func func)
+    void for_each_class_member(ClassName& object, Func func)
     {
         static_assert(is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
         using class_descriptor = class_descriptor<ClassName>;
@@ -327,7 +328,16 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
             adk::reflect::internal::generate_enum_class_map<enum_name, items>();                            \
     };                                                                                                      \
     ADK_INTERNAL_FOR_EACH(enum_name, ADK_INTERNAL_REFLECT_ENUM_CLASS_ITEM, __VA_ARGS__);
-    
+
+/**
+ * Helper function that both declares an enum with a name and items
+ * and produces reflection metadata for it. This can only be used
+ * for trivial enum classes where values are not set manually.
+ */
+#define ADK_DECLARE_ENUM_CLASS(enum_name, ...)                                                              \
+    enum class enum_name { __VA_ARGS__ };                                                                   \
+    ADK_REFLECT_ENUM_CLASS(enum_name, __VA_ARGS__)
+
     /**
      * Converts an enum class value to a string showing the full enum type name and
      * the value name
