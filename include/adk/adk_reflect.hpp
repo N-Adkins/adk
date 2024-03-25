@@ -210,10 +210,10 @@ std::unordered_map<EnumName, std::string_view> generate_enum_class_map()
  * passed object.
  */
 template <typename MemberDescriptor, typename ClassName, typename Func>
-void call_member_data(ClassName& object, Func func)
+void call_member_data(const ClassName& object, Func func)
 {
     using member_type = typename MemberDescriptor::type;
-    member_type* value = reinterpret_cast<member_type*>(static_cast<char*>(static_cast<void*>(std::addressof(object))) + MemberDescriptor::offset);
+    const member_type* value = reinterpret_cast<const member_type*>(static_cast<const char*>(static_cast<const void*>(std::addressof(object))) + MemberDescriptor::offset);
     func(MemberDescriptor::name, *value);
 }
 
@@ -230,7 +230,7 @@ template <typename... Args>
 struct call_for_each_member<std::tuple<Args...>> 
 {
     template <typename ClassName, typename Func>
-    constexpr void operator()(ClassName& object, Func func)
+    constexpr void operator()(const ClassName& object, Func func)
     {
         (call_member_data<Args>(object, func),...);
     }
@@ -281,7 +281,7 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
      * object.
      */
     template <typename ClassName, typename Func>
-    void for_each_class_member(ClassName& object, Func func)
+    void for_each_class_member(const ClassName& object, Func func)
     {
         static_assert(is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
         using class_descriptor = class_descriptor<ClassName>;
