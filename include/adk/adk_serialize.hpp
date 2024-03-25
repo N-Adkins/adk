@@ -16,10 +16,12 @@
 #ifndef ADK_SERIALIZE_HPP
 #define ADK_SERIALIZE_HPP
 
+#include <charconv>
 #include <cstdint>
 #include <memory>
 #include <ostream>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include "adk_reflect.hpp"
 
@@ -53,7 +55,7 @@ struct serialized_trivial : public serialized_field
 struct serialized_structure : public serialized_field
 {
     std::string identifier;
-    std::vector<std::unique_ptr<serialized_field>> fields;
+    std::unordered_map<std::string, std::unique_ptr<serialized_field>> fields;
     void print(std::ostream& os) const override
     {
         if (!root) {
@@ -62,8 +64,9 @@ struct serialized_structure : public serialized_field
         os << "{";
         os << "\"identifier\":\"" << identifier << "\",";
         const auto last = fields.size() - 1;
-        for (std::size_t i = 0; i < fields.size(); i++) {
-            fields[i]->print(os);
+        const std::size_t i = 0;
+        for (const auto& [_, field] : fields) {
+            field->print(os);
             if (i != last) {
                 os << ",";
             }
@@ -97,13 +100,14 @@ std::unique_ptr<internal::serialized_field> serialize(const T& data, const std::
     structure->name = name;
     structure->identifier = std::string(descriptor::name);
     structure->root = root;
-    adk::reflect::for_each_class_member(data, [&structure](auto name, const auto& value){
-        structure->fields.push_back(serialize(value, std::string(name), false));
+    adk::reflect::for_each_object_member(data, [&structure](auto name, const auto& value){
+        const auto alloc_name = std::string(name);
+        structure->fields[alloc_name] = std::move(serialize(value, alloc_name, false));
     });
     return std::unique_ptr<internal::serialized_field>(structure);
 }
 
-#define ADK_BASIC_TYPE(type)                                                                                \
+#define ADK_BASIC_SERIAL(type)                                                                                \
     template <>                                                                                             \
     inline std::unique_ptr<internal::serialized_field> serialize(const type& data,                          \
             const std::string& name, bool root)                                                             \
@@ -111,21 +115,22 @@ std::unique_ptr<internal::serialized_field> serialize(const T& data, const std::
         return internal::serialize_basic(data, name, root);                                                 \
     }
 
-ADK_BASIC_TYPE(std::uint64_t)
-ADK_BASIC_TYPE(std::uint32_t)
-ADK_BASIC_TYPE(std::uint16_t)
-ADK_BASIC_TYPE(std::uint8_t)
-ADK_BASIC_TYPE(std::int64_t)
-ADK_BASIC_TYPE(std::int32_t)
-ADK_BASIC_TYPE(std::int16_t)
-ADK_BASIC_TYPE(std::int8_t)
-ADK_BASIC_TYPE(float)
-ADK_BASIC_TYPE(double)
+ADK_BASIC_SERIAL(std::uint64_t)
+ADK_BASIC_SERIAL(std::uint32_t)
+ADK_BASIC_SERIAL(std::uint16_t)
+ADK_BASIC_SERIAL(std::uint8_t)
+ADK_BASIC_SERIAL(std::int64_t)
+ADK_BASIC_SERIAL(std::int32_t)
+ADK_BASIC_SERIAL(std::int16_t)
+ADK_BASIC_SERIAL(std::int8_t)
+ADK_BASIC_SERIAL(float)
+ADK_BASIC_SERIAL(double)
 
-#undef ADK_BASIC_TYPE
+#undef ADK_BASIC_SERIAL
 
+// std::string
 template <>
-inline std::unique_ptr<internal::serialized_field> serialize<std::string>(const std::string& data, const std::string& name, bool root)
+inline std::unique_ptr<internal::serialized_field> serialize(const std::string& data, const std::string& name, bool root)
 {
     auto* trivial = new internal::serialized_trivial();
     trivial->name = name;
@@ -134,6 +139,8 @@ inline std::unique_ptr<internal::serialized_field> serialize<std::string>(const 
     return std::unique_ptr<internal::serialized_field>(trivial);
 }
 
+// char, when done with the ADK_BASIC_TYPE macro it stores the ascii value as a string so
+// we have to specialize it manually
 template <>
 inline std::unique_ptr<internal::serialized_field> serialize(const char& data, const std::string& name, bool root)
 {
@@ -142,6 +149,68 @@ inline std::unique_ptr<internal::serialized_field> serialize(const char& data, c
     trivial->value = std::string(1, data);
     trivial->root = root;
     return std::unique_ptr<internal::serialized_field>(trivial);
+}
+
+template <typename T>
+inline T deserialize(internal::serialized_field* field)
+{
+    static_assert(reflect::is_class_reflected<T>::value, "Attempting to deserialize type that has no reflection data");
+    
+    internal::serialized_structure* structure = static_cast<internal::serialized_structure*>(field);
+
+    T object;
+    char* ptr = static_cast<char*>(static_cast<void*>(&object));
+    adk::reflect::for_each_class_member<T>([ptr, structure](auto name, auto offset, auto type_value){
+        using type = std::decay_t<decltype(type_value)>;
+        const auto alloc_name = std::string(name);
+        if (!structure->fields.contains(alloc_name)) {
+            return;
+        }
+        type* casted = reinterpret_cast<type*>(ptr + offset);
+        *casted = deserialize<type>(structure->fields[alloc_name].get());
+    });
+
+    return object;
+}
+
+#define ADK_BASIC_DESERIAL(type)                                                                            \
+    template <>                                                                                             \
+    inline type deserialize(internal::serialized_field* field)                                              \
+    {                                                                                                       \
+        internal::serialized_trivial* trivial = static_cast<internal::serialized_trivial*>(field);          \
+        type value;                                                                                         \
+        std::from_chars(trivial->value.data(), trivial->value.data() + trivial->value.size(), value);       \
+        return value;                                                                                       \
+    }
+
+
+ADK_BASIC_DESERIAL(std::uint64_t)
+ADK_BASIC_DESERIAL(std::uint32_t)
+ADK_BASIC_DESERIAL(std::uint16_t)
+ADK_BASIC_DESERIAL(std::uint8_t)
+ADK_BASIC_DESERIAL(std::int64_t)
+ADK_BASIC_DESERIAL(std::int32_t)
+ADK_BASIC_DESERIAL(std::int16_t)
+ADK_BASIC_DESERIAL(std::int8_t)
+ADK_BASIC_DESERIAL(float)
+ADK_BASIC_DESERIAL(double)
+
+#undef ADK_BASIC_DESERIAL
+
+// char
+template <>
+inline char deserialize(internal::serialized_field* field)
+{
+    internal::serialized_trivial* trivial = static_cast<internal::serialized_trivial*>(field);
+    return trivial->value[0];
+}
+
+// std::string
+template <>
+inline std::string deserialize(internal::serialized_field* field)
+{
+    internal::serialized_trivial* trivial = static_cast<internal::serialized_trivial*>(field);
+    return trivial->value;
 }
 
 } // namespace adk::serialize
