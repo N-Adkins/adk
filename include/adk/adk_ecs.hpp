@@ -538,4 +538,6 @@ public:
 
 } // namespace adk::ecs
 
+#undef ADK_ASSERT
+
 #endif

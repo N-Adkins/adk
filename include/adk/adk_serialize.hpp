@@ -16,14 +16,20 @@
 #ifndef ADK_SERIALIZE_HPP
 #define ADK_SERIALIZE_HPP
 
+#include <cassert>
 #include <charconv>
 #include <cstdint>
 #include <memory>
 #include <ostream>
 #include <string>
 #include <type_traits>
-#include <vector>
 #include "adk_reflect.hpp"
+
+#ifdef ADK_USE_ASSERTIONS
+    #define ADK_ASSERT(condition) assert(condition)
+#else
+    #define ADK_ASSERT(...) ((void)0);
+#endif
 
 namespace adk::serialize::internal
 {
@@ -91,11 +97,15 @@ inline std::unique_ptr<serialized_field> serialize_basic(const T& data, const st
 namespace adk::serialize
 {
 
+// Explicitly add std container types that are added here
 template <typename T>
+concept serializeable = reflect::reflected_class<T> || std::is_fundamental_v<T> 
+    || std::is_same_v<T, std::string>; 
+
+template <serializeable T>
 std::unique_ptr<internal::serialized_field> serialize(const T& data, const std::string& name = "", bool root = true)
 {
-    static_assert(reflect::is_class_reflected<T>::value, "Attempting to serialize type that has no reflection data");
-    using descriptor = adk::reflect::class_descriptor<T>;
+    using descriptor = reflect::class_descriptor<T>;
     auto *structure = new internal::serialized_structure();
     structure->name = name;
     structure->identifier = std::string(descriptor::name);
@@ -151,11 +161,9 @@ inline std::unique_ptr<internal::serialized_field> serialize(const char& data, c
     return std::unique_ptr<internal::serialized_field>(trivial);
 }
 
-template <typename T>
+template <serializeable T>
 inline T deserialize(internal::serialized_field* field)
 {
-    static_assert(reflect::is_class_reflected<T>::value, "Attempting to deserialize type that has no reflection data");
-    
     internal::serialized_structure* structure = static_cast<internal::serialized_structure*>(field);
 
     T object;
@@ -214,5 +222,7 @@ inline std::string deserialize(internal::serialized_field* field)
 }
 
 } // namespace adk::serialize
+
+#undef ADK_ASSERT
 
 #endif

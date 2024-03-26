@@ -11,7 +11,6 @@
 #ifndef ADK_REFLECT_HPP
 #define ADK_REFLECT_HPP
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <memory>
@@ -267,6 +266,12 @@ struct call_for_each_member<std::tuple<Args...>>
     }
 };
 
+template <typename T>
+concept is_complete = requires(T) 
+{
+    sizeof(T);
+};
+
 } // namespace adk::reflect::internal
 
 namespace adk::reflect
@@ -284,15 +289,8 @@ struct class_descriptor;
 template <typename ClassDescriptor, internal::comptime_string name>
 struct member_descriptor;
 
-/**
- * SFINAE function that checks if class_descriptor is specialized for a
- * certain class.
- */
-template <typename ClassName, typename = void>
-struct is_class_reflected : std::false_type {};
-
-template <typename ClassName>
-struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), void())> : std::true_type {};
+template <typename T>
+concept reflected_class = internal::is_complete<class_descriptor<T>>;
 
 /**
  * Introduces compile-time reflection metadata of the provided class and public members.
@@ -311,18 +309,16 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
      * Calls passed function with a reference to each member in passed
      * object.
      */
-    template <typename ClassName, typename Func>
+    template <reflected_class ClassName, typename Func>
     void for_each_object_member(const ClassName& object, Func func)
     {
-        static_assert(is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
         using class_descriptor = class_descriptor<ClassName>;
         internal::call_for_each_object_member<typename class_descriptor::members>()(object, func);
     }
 
-    template <typename ClassName, typename Func>
+    template <reflected_class ClassName, typename Func>
     void for_each_class_member(Func func)
     {
-        static_assert(is_class_reflected<ClassName>::value, "Passed class has no reflection metadata!");
         using class_descriptor = class_descriptor<ClassName>;
         internal::call_for_each_member<typename class_descriptor::members>()(func);
     }
@@ -339,20 +335,13 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
     template <typename EnumDescriptor, EnumDescriptor::type item>
     struct enum_class_item_descriptor;
 
-    /**
-     * SFINAE function that checks if enum_class_descriptor is specialized for a
-     * certain class.
-     */
-    template <typename EnumName, typename = void>
-    struct is_enum_class_reflected : std::false_type {};
+    template <typename T>
+    concept reflected_enum_class = internal::is_complete<enum_class_descriptor<T>>;
 
-    template <typename EnumName>
-    struct is_enum_class_reflected<EnumName, decltype(enum_class_descriptor<EnumName>(), void())> : std::true_type {};
-    
 /**
  * Introduces compile-time reflection metadata of the provided enum class and items.
  */
-#define ADK_REFLECT_ENUM_CLASS(enum_name, ...)                                                                   \
+#define ADK_REFLECT_ENUM_CLASS(enum_name, ...)                                                              \
     template <> struct adk::reflect::enum_class_descriptor<enum_name>                                       \
     {                                                                                                       \
         using type = enum_name;                                                                             \
@@ -381,10 +370,9 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
      * Converts an enum class value to a string showing the full enum type name and
      * the value name
      */
-    template <typename EnumName>
+    template <reflected_enum_class EnumName>
     std::string_view enum_class_to_string(EnumName value)
     {
-        static_assert(is_enum_class_reflected<EnumName>::value, "Passed enum class has no reflection metadata!");
         using enum_descriptor = enum_class_descriptor<EnumName>;
         return enum_descriptor::map.at(value);        
     }
@@ -392,14 +380,15 @@ struct is_class_reflected<ClassName, decltype(class_descriptor<ClassName>(), voi
     /**
      * Calls passed function with data for each item in an enum
      */
-    template <typename EnumName, typename Func>
+    template <reflected_enum_class EnumName, typename Func>
     constexpr void for_each_enum_class_item(Func func)
     {
-        static_assert(is_enum_class_reflected<EnumName>::value, "Passed enum class has no reflection metadata!");
         using enum_descriptor = enum_class_descriptor<EnumName>;
         internal::call_for_each_item<typename enum_descriptor::items>()(func);
     }
     
 } // namespace adk::reflect
+
+#undef ADK_ASSERT
 
 #endif
