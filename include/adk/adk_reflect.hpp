@@ -243,7 +243,8 @@ struct call_for_each_object_member<std::tuple<Args...>>
 template <typename MemberDescriptor, typename Func>
 void call_member_data(Func func)
 {
-    typename MemberDescriptor::type obj;
+    using type = typename MemberDescriptor::type;
+    type obj = type();
     func(MemberDescriptor::name, MemberDescriptor::offset, obj);
 }
 
