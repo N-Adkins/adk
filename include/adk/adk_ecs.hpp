@@ -5,7 +5,7 @@
     Header-only Entity Component System, entirely self-contained with
     no boilerplate or macros needed to function.
 
-    The public interface is adk, adk::internal should not be accessed
+    The public interface is adk::ecs, adk::ecs::internal should not be accessed
     unless you know what you're doing.
 */
 
